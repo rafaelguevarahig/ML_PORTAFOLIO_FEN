@@ -26,7 +26,9 @@ portfolio = {
 }
 
 # Define market representation
-market_representation = ['SPY']
+# es un índice de referencia (benchmark) que se utiliza para comparar el desempeño de tu portafolio contra el mercado general.
+market_representation = ['SPY'] 
+#
 
 # Define a dictionary for storing weights of portfolios
 portfolio_weights = {}
@@ -36,12 +38,27 @@ training_start_date = '2013-11-27'
 training_end_date = '2018-11-27'
 backtesting_start_date = training_end_date
 backtesting_end_date = '2023-11-27'
-risk_free_rate = 0.04
+risk_free_rate = 0.04 #Es la tasa de rendimiento sin riesgo que un inversor puede obtener sin tomar riesgo (típicamente bonos del gobierno).
 
 # Define risk sensitivity for Mean-Variance Optimization
+"""
+Max volatility es el riesgo máximo permitido que puede tener tu portafolio optimizado. Representa la desviación estándar máxima aceptable de los retornos
+Interpretación:
+Volatilidad = 22.5% significa que el portafolio no puede fluctuar más de 22.5% anualmente
+Es una restricción de riesgo en el modelo de optimización Mean-Variance
+El algoritmo ajustará los pesos de las acciones para cumplir con este límite
+"""
 max_volatility = 0.225
 
 # Define minimum and maximum asset weights for Mean-Variance Optimization
+
+"""min_weight = 1%: Cada acción debe representar al menos el 1% de tu portafolio
+
+Evita tener posiciones muy pequeñas que sean irrelevantes
+max_weight = 25%: Ninguna acción puede representar más del 25% de tu portafolio
+
+Evita concentrar demasiado dinero en una sola acción (riesgo de concentración)
+"""
 min_weight = .01
 max_weight = .25
 

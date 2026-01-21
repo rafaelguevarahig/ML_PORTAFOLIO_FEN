@@ -12,7 +12,7 @@ def download_stock_data(tickers, start_date, end_date):
     :param list tickers: list of stock tickers to gather data for
     :return: pandas dataframe with stock data
     """
-    return yf.download(tickers, start_date, end_date, progress=False)
+    return yf.download(tickers, start_date, end_date, progress=False, auto_adjust=False)
 
 
 def download_factor_data(start_date, end_date):
@@ -34,12 +34,12 @@ def download_factor_data(start_date, end_date):
     for factor, tickers in factor_proxies.items():
         if isinstance(tickers, str):
             # Single ticker (e.g., for market)
-            data = yf.download(tickers, start=start_date, end=end_date, progress=False)['Adj Close'].pct_change()
+            data = yf.download(tickers, start=start_date, end=end_date, progress=False, auto_adjust=False)['Adj Close'].pct_change()
             factor_data[factor] = data
         else:
             # Difference between two tickers (e.g., SMB, HML)
-            data1 = yf.download(tickers[0], start=start_date, end=end_date, progress=False)['Adj Close'].pct_change()
-            data2 = yf.download(tickers[1], start=start_date, end=end_date, progress=False)['Adj Close'].pct_change()
+            data1 = yf.download(tickers[0], start=start_date, end=end_date, progress=False, auto_adjust=False)['Adj Close'].pct_change()
+            data2 = yf.download(tickers[1], start=start_date, end=end_date, progress=False, auto_adjust=False)['Adj Close'].pct_change()
             factor_data[factor] = data1 - data2
 
     return factor_data.dropna()

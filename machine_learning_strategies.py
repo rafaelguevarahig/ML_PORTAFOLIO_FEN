@@ -15,22 +15,40 @@ def download_stock_data(tickers, start_date, end_date):
     :param list tickers: list of stock tickers to gather data for
     :param str start_date: start date for download in form 'YYYY-MM-DD'
     :param str end_date: end date for download in form 'YYYY-MM-DD'
-    :return: pandas Dataframe with stock data
+    :return: pandas Series with stock data (Adj Close)
     """
-    data = yf.download(tickers, start=start_date, end=end_date, progress=False)
-    return data['Adj Close']
+    data = yf.download(tickers, start=start_date, end=end_date, progress=False, auto_adjust=False)
+    adj_close = data['Adj Close']
+    
+    # Si es DataFrame (múltiples tickers), tomar la primera columna
+    if isinstance(adj_close, pd.DataFrame):
+        adj_close = adj_close.iloc[:, 0]
+    
+    # Asegurar que la Series tenga el nombre correcto
+    adj_close.name = 'Adj Close'
+    return adj_close
 
 
 def create_additional_features(stock_data):
     """
     Creates additional features for the stock data, such as moving averages
-    :param stock_data: Dataset to create features for
+    :param stock_data: Dataset to create features for (Series or DataFrame)
     :return: pandas Dataframe with columns for moving averages
     """
-    df = pd.DataFrame(stock_data)
-    df['5d_rolling_avg'] = stock_data.rolling(window=5).mean()
-    df['10d_rolling_avg'] = stock_data.rolling(window=10).mean()
-    # Add more features as needed
+    # Asegurar que sea un DataFrame con la columna 'Adj Close'
+    if isinstance(stock_data, pd.Series):
+        df = pd.DataFrame({stock_data.name if stock_data.name else 'Adj Close': stock_data})
+    else:
+        df = stock_data.copy()
+    
+    # Asegurar que la columna se llame 'Adj Close'
+    if 'Adj Close' not in df.columns and len(df.columns) == 1:
+        df.columns = ['Adj Close']
+    
+    # Crear features usando la columna 'Adj Close'
+    df['5d_rolling_avg'] = df['Adj Close'].rolling(window=5).mean()
+    df['10d_rolling_avg'] = df['Adj Close'].rolling(window=10).mean()
+    
     return df
 
 

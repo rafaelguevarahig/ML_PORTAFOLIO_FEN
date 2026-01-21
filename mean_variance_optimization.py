@@ -23,7 +23,7 @@ def download_stock_data(tickers, start_date, end_date):
     :param str end_date: end date for download in form 'YYYY-MM-DD'
     :return: pandas Dataframe with stock data
     """
-    return yf.download(tickers, start_date, end_date, progress=False)
+    return yf.download(tickers, start_date, end_date, progress=False, auto_adjust=False)
 
 
 def mean_variance_optimization(tickers, start_date, end_date, max_volatility, expected_returns=None, min_weight=0.01, max_weight=0.35, simulations=10000):
