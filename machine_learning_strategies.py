@@ -4,162 +4,182 @@ import yfinance as yf
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 
 
-def download_stock_data(tickers, start_date, end_date):
-    """
-    Downloads data for a list of stock ticker strings
-    :param list tickers: list of stock tickers to gather data for
-    :param str start_date: start date for download in form 'YYYY-MM-DD'
-    :param str end_date: end date for download in form 'YYYY-MM-DD'
-    :return: pandas Series with stock data (Adj Close)
-    """
-    data = yf.download(tickers, start=start_date, end=end_date, progress=False, auto_adjust=False)
-    adj_close = data['Adj Close']
+def download_stock_data(ticker, start_date, end_date):
+    """Download stock data using yfinance with auto_adjust=False"""
+    if isinstance(ticker, list):
+        ticker = ticker[0]
     
-    # Si es DataFrame (múltiples tickers), tomar la primera columna
-    if isinstance(adj_close, pd.DataFrame):
-        adj_close = adj_close.iloc[:, 0]
+    data = yf.download(ticker, start=start_date, end=end_date, auto_adjust=False)
     
-    # Asegurar que la Series tenga el nombre correcto
-    adj_close.name = 'Adj Close'
-    return adj_close
+    # Flatten MultiIndex columns if present
+    if isinstance(data.columns, pd.MultiIndex):
+        data.columns = data.columns.get_level_values(0)
+    
+    return data
 
 
 def create_additional_features(stock_data):
-    """
-    Creates additional features for the stock data, such as moving averages
-    :param stock_data: Dataset to create features for (Series or DataFrame)
-    :return: pandas Dataframe with columns for moving averages
-    """
-    # Asegurar que sea un DataFrame con la columna 'Adj Close'
-    if isinstance(stock_data, pd.Series):
-        df = pd.DataFrame({stock_data.name if stock_data.name else 'Adj Close': stock_data})
-    else:
-        df = stock_data.copy()
+    """Create technical indicators from price data"""
+    df = stock_data.copy()
     
-    # Asegurar que la columna se llame 'Adj Close'
-    if 'Adj Close' not in df.columns and len(df.columns) == 1:
-        df.columns = ['Adj Close']
+    # Asegurarse de que tenemos Series, no DataFrames
+    adj_close = df['Adj Close']
+    if isinstance(adj_close, pd.DataFrame):
+        adj_close = adj_close.iloc[:, 0]
     
-    # Crear features usando la columna 'Adj Close'
-    df['5d_rolling_avg'] = df['Adj Close'].rolling(window=5).mean()
-    df['10d_rolling_avg'] = df['Adj Close'].rolling(window=10).mean()
+    volume = df['Volume']
+    if isinstance(volume, pd.DataFrame):
+        volume = volume.iloc[:, 0]
     
-    return df
+    # Crear nuevo DataFrame con solo las columnas necesarias
+    result = pd.DataFrame(index=df.index)
+    result['Adj Close'] = adj_close
+    result['Volume'] = volume
+    
+    # Retornos semanales (reduce ruido)
+    result['Weekly_Return'] = adj_close.pct_change(5)
+    
+    # Volatilidad (desviación estándar de retornos)
+    result['Volatility'] = adj_close.pct_change().rolling(window=20).std()
+    
+    # Media móvil (tendencia)
+    sma_20 = adj_close.rolling(window=20).mean()
+    sma_50 = adj_close.rolling(window=50).mean()
+    result['SMA_20'] = sma_20
+    result['SMA_50'] = sma_50
+    result['Price_vs_SMA'] = (adj_close - sma_20) / sma_20
+    
+    # Momentum (cambio de precio relativo)
+    result['Momentum'] = adj_close.pct_change(5)  # 5-day momentum
+    
+    # Volumen relativo
+    vol_mean = volume.rolling(window=20).mean()
+    result['Volume_Ratio'] = volume / vol_mean
+    
+    return result.dropna()
 
 
-def prepare_data_for_ml(stock_data, lag_days=5):
-    """
-    Prepares the data for machine learning by creating lagged features
-    :param stock_data: pandas Series or DataFrame
-    :param lag_days: the number of days to lag the feature
-    :return: pandas DataFrame with the original data and additional columns for each lagged feature
-    """
-    if isinstance(stock_data, pd.Series):
-        df = pd.DataFrame(stock_data, columns=['Adj Close'])
-    else:
-        df = stock_data.copy()
-
-    target_column = 'Adj Close' if 'Adj Close' in df.columns else df.columns[0]
-
-    # Create lagged features based on the target column
-    for i in range(1, lag_days + 1):
-        df[f'lag_{i}'] = df[target_column].shift(i)
-
-    df.dropna(inplace=True)
-    return df
+def prepare_data_for_ml(stock_data):
+    """Prepare features and target with lag structure"""
+    df = stock_data.copy()
+    
+    # Target: Retorno semanal forward-looking (lo que queremos predecir)
+    df['Target'] = df['Weekly_Return'].shift(-5)  # Retorno de la próxima semana
+    
+    return df.dropna()
 
 
 def train_model(model, X_train, y_train):
-    """
-    Trains the given model
-    :param model: model to train
-    :param X_train: features to train the model off of
-    :param y_train: target values corresponding to X_train
-    :return: trained model
-    """
+    """Train the model"""
     model.fit(X_train, y_train)
     return model
 
 
+def predict_future_returns(model, X_test):
+    """Predict WEEKLY returns from trained model"""
+    predictions = model.predict(X_test)
+    # Retorna el promedio de predicciones
+    return np.mean(predictions)
+
+
 def get_model_confidence(model, X_test, y_test):
+    """Calculate model confidence using R² score"""
+    from sklearn.metrics import r2_score
+    
+    y_pred = model.predict(X_test)
+    r2 = r2_score(y_test, y_pred)
+    
+    # Clamp entre 0.01 y 1 para mejor interpretación
+    # Si R² es negativo o muy bajo, usar mínimo de 0.01
+    r2 = max(0.01, min(1.0, r2))
+    
+    return r2
+
+
+def generate_investor_views(ticker, start_date, end_date, model_type='Gradient Boosting'):
     """
-    Calculates the confidence in the model based on its performance.
-    :param model: Trained machine learning model.
-    :param DataFrame X_test: Test features.
-    :param Series y_test: True values for the test set.
-    :return: A confidence score for the model.
-    """
-    # Using the model's R-squared value as confidence
-    r_squared = model.score(X_test, y_test)
-    return r_squared
-
-
-def predict_future_returns(model, stock_data):
-    """
-    Predicts future returns using the provided model and stock data.
-    :param model: Trained machine learning model.
-    :param stock_data: Data used for prediction (DataFrame or NumPy array).
-    :return: Predicted future return.
-    """
-    # Check if stock_data is a DataFrame and prepare it if so
-    if isinstance(stock_data, pd.DataFrame):
-        prepared_data = prepare_data_for_ml(stock_data)
-        features = prepared_data.drop('Adj Close', axis=1)
-    else:
-        # If stock_data is already a NumPy array, use it directly
-        features = stock_data
-
-    # Standardize features (if required by your model)
-    scaler = StandardScaler()
-    features_scaled = scaler.fit_transform(features)
-
-    # Predict using the model
-    predictions = model.predict(features_scaled)
-
-    # Here, you might want to aggregate the predictions in a specific way.
-    # For simplicity, let's return the last prediction
-    return predictions[-1]
-
-
-def generate_investor_views(ticker, start_date, end_date, model_type='Linear Regression'):
-    """
-    Generates future stock return predictions and model confidence for a given stock ticker within a specified date range, using a selected machine learning model.
+    Generates stock RETURN predictions using weekly returns.
+    
     :param str ticker: ticker to generate investor views for
     :param start_date: start date for training in form 'YYYY-MM-DD'
     :param end_date: end date for training in form 'YYYY-MM-DD'
-    :param model_type: type of machine learning model ('Linear Regression', 'Random Forest', or 'Gradient Boosting')
-    :return: tuple with predicted returns and model's confidence
+    :param model_type: 'Gradient Boosting' (recommended), 'Random Forest', or 'Linear Regression'
+    :return: tuple with predicted ANNUAL RETURNS and model's confidence (R²)
     """
-    stock_data = download_stock_data(ticker, start_date, end_date)
-    ml_stock_data_with_features = create_additional_features(stock_data)
-
-    X = ml_stock_data_with_features.drop('Adj Close', axis=1)
-    y = ml_stock_data_with_features['Adj Close']
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    # Handle NaN values
-    imputer = SimpleImputer(missing_values=np.nan, strategy='mean')
-    X_train = imputer.fit_transform(X_train)
-    X_test = imputer.transform(X_test)
-
-    # Select and train the model
-    if model_type == 'Random Forest':
-
-        model = RandomForestRegressor(n_estimators=100, random_state=42)
-    elif model_type == 'Gradient Boosting':
-        model = GradientBoostingRegressor(n_estimators=100, random_state=42)
-    elif model_type == 'Linear Regression':
-        model = LinearRegression()
-    else:
-        print("Please choose a valid model and try again!")
-        return None
-
-    trained_model = train_model(model, X_train, y_train)
-    predicted_return = predict_future_returns(trained_model, X_test)
-    confidence = get_model_confidence(trained_model, X_test, y_test)
-    return predicted_return, confidence
+    try:
+        # 1. Download and prepare data
+        stock_data = download_stock_data(ticker, start_date, end_date)
+        ml_stock_data = create_additional_features(stock_data)
+        ml_stock_data = prepare_data_for_ml(ml_stock_data)
+        
+        # 2. Prepare X and y
+        feature_cols = ['Volatility', 'Price_vs_SMA', 'Momentum', 'Volume_Ratio', 
+                        'SMA_20', 'SMA_50']
+        X = ml_stock_data[feature_cols].copy()
+        y = ml_stock_data['Target'].copy()
+        
+        # Normalize features
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+        X = pd.DataFrame(X_scaled, columns=feature_cols, index=X.index)
+        
+        # Remove NaN values
+        valid_idx = ~np.isnan(y.values)
+        X = X[valid_idx].reset_index(drop=True)
+        y = y[valid_idx].reset_index(drop=True)
+        
+        if len(X) < 100:
+            print(f"⚠️ Insufficient data for {ticker} ({len(X)} samples)")
+            return 0.0, 0.1
+        
+        # 3. Train-test split (70-30 para más datos en test)
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.3, random_state=42, shuffle=True
+        )
+        
+        # Handle any remaining NaN
+        imputer = SimpleImputer(strategy='mean')
+        X_train = pd.DataFrame(imputer.fit_transform(X_train), columns=feature_cols)
+        X_test = pd.DataFrame(imputer.transform(X_test), columns=feature_cols)
+        
+        # 4. Select and train model
+        if model_type == 'Random Forest':
+            model = RandomForestRegressor(n_estimators=100, max_depth=10, 
+                                        random_state=42, n_jobs=-1)
+        elif model_type == 'Gradient Boosting':
+            model = GradientBoostingRegressor(n_estimators=100, max_depth=5,
+                                            learning_rate=0.1, subsample=0.8,
+                                            random_state=42)
+        else:
+            model = LinearRegression()
+        
+        trained_model = train_model(model, X_train, y_train)
+        
+        # 5. Predict weekly returns and annualize
+        predicted_weekly_return = predict_future_returns(trained_model, X_test)
+        
+        # Annualize: (1 + r_weekly)^52 - 1
+        predicted_annual_return = (1 + predicted_weekly_return) ** 52 - 1
+        
+        # Clip to reasonable bounds
+        predicted_annual_return = np.clip(predicted_annual_return, -0.5, 2.0)
+        
+        # 6. Get confidence
+        confidence = get_model_confidence(trained_model, X_test, y_test)
+        
+        print(f"  ✅ {ticker}: Weekly Return: {predicted_weekly_return*100:.3f}%, "
+              f"Annual Return: {predicted_annual_return*100:.2f}%, "
+              f"Confidence (R²): {confidence:.3f}, "
+              f"Train samples: {len(X_train)}, Test samples: {len(X_test)}")
+        
+        return predicted_annual_return, confidence
+        
+    except Exception as e:
+        print(f"  ⚠️ Error processing {ticker}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return 0.0, 0.1
