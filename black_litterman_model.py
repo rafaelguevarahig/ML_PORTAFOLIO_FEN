@@ -1,5 +1,8 @@
 import numpy as np
 
+import yfinance as yf
+
+
 
 def black_litterman_adjustment(market_returns, investor_views, view_confidences, historical_data, tau=0.025):
     """
@@ -30,22 +33,24 @@ def black_litterman_adjustment(market_returns, investor_views, view_confidences,
 
 def get_market_caps(tickers):
     """
-    Provides example market capitalizations for a predefined set of stocks. TEMPORARILY USING PLACEHOLDER DATA
-    :param tickers: list of tickers
-    :return: A dictionary with tickers and their example market capitalizations.
+    Obtiene la capitalización de mercado actual desde Yahoo Finance
+    usando yfinance.
+
+    :param tickers: list[str] – lista de tickers (ej: ['AAPL','MSFT','GOOGL'])
+    :return: dict {ticker: market_cap}
     """
-    market_caps = {
-        'AAPL': 2.0e12,  # Apple Inc.
-        'JNJ': 800.0e9,  # Johnson & Johnson
-        'PG': 400.0e9,   # Procter & Gamble Co.
-        'JPM': 250.0e9,  # JPMorgan Chase & Co.
-        'XOM': 200.0e9,  # Exxon Mobil Corporation
-        'MMM': 230.0e9,  # 3M Company
-        'SO': 220.0e9,   # Southern Company
-        'VZ': 260.0e9,   # Verizon Communications Inc.
-        'NKE': 400.0e9,  # NIKE, Inc.
-        'DD': 130.0e9    # DuPont de Nemours, Inc.
-    }
+    market_caps = {}
+
+    for ticker in tickers:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+
+        market_cap = info.get("marketCap")
+        if market_cap is None:
+            raise ValueError(f"No se pudo obtener marketCap para {ticker}")
+
+        market_caps[ticker] = market_cap
+
     return market_caps
 
 
